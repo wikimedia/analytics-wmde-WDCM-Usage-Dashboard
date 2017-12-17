@@ -25,20 +25,27 @@ shinyUI(
             
             # - fluidRow Title
             fluidRow(
-              column(width = 12,
-                     h2('WDCM Usage Dashboard'),
-                     HTML('<font size="3"><b>Wikidata Concepts Monitor</b></font>')
-                     
+              column(width = 5,
+                     fluidRow(
+                       column(width = 3,
+                              img(src = 'Wikidata-logo-en.png',
+                                  align = "left")
+                       ),
+                       column(width = 1),
+                       column(width = 8,
+                              h1('WDCM Usage Dashboard'),
+                              HTML('<font size="5"><b>Wikidata Concepts Monitor</b></font>')
+                       )
                      )
+              ),
+              column(width = 7,
+                     br(),
+                     HTML('<p align="right"><b>Interactive visualizations of Wikidata use by other Wikimedia projects.</b></p>'),
+                     HTML('<p align="right"><b><a href = "https://www.wikidata.org/wiki/Wikidata:Wikidata_Concepts_Monitor" target="_blank">Visit the WDCM wiki page</a></b></p>'),
+                     HTML('<p align="right"><b>Did you spot a bug, a missing label, or wrong data? <a href = "https://www.wikidata.org/wiki/Wikidata:Wikidata_Concepts_Monitor/UserFeedback" target="_blank">Give us feedback here</a></b></p>'),
+                     htmlOutput('updateInfo')
+              )
             ), # - fluidRow Title END
-            
-            # - fluidRow Logo
-            fluidRow(
-              column(width = 12,
-                     img(src='Wikidata-logo-en.png', 
-                         align = "left")
-                     )
-            ), # - fluidRow END
             
             # - hr()
             fluidRow(

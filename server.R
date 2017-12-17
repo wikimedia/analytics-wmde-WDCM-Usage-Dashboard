@@ -159,8 +159,26 @@ unzip_projectTypes <- lapply(projectTypes, function(x) {
 })
 names(unzip_projectTypes) <- search_projectTypes
 
+### --- Fetch update info
+setwd('/srv/shiny-server/WDCM_UsageDashboard/update/')
+update <- read.csv('toLabsReport.csv', 
+                   header = T,
+                   check.names = F,
+                   stringsAsFactors = F,
+                   row.names = 1)
+
 ### --- shinyServer
 shinyServer(function(input, output, session) {
+  
+  ### --- output: updateInfo
+  output$updateInfo <- renderText({
+    date <- update$timeStamp[dim(update)[1]]
+    date <- strsplit(as.character(date), split = " ", fixed = T)[[1]][1]
+    date <- strsplit(date, split = "-", fixed = T)
+    date[[1]][2] <- month.name[as.numeric(date[[1]][2])]
+    date <- paste(unlist(date), collapse = " ")
+    return(paste("<p align=right>Last update: <i>", date, "</i></p>", sep = ""))
+  })
   
   ### ----------------------------------
   ### --- BASIC FACTS
