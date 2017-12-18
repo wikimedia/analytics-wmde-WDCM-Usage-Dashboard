@@ -531,7 +531,9 @@ shinyUI(
                                                    <font size = "2">Fine-grained information on Wikidata usage across client projects and project types. Cross-tabulations and similar..</font></li><br>
                                                    <li><b>WDCM Items</b><br>
                                                    <font size = "2">Fine-grained information on particular Wikidata item usage across the client projects.<b> (Under development)</b></font></li><br>
-                                                  <li><b><a href = "https://wikitech.wikimedia.org/wiki/Wikidata_Concepts_Monitor">WDCM System Technical Documentation</a></b><br>
+                                                   <li><b><a href = "http://wdcm.wmflabs.org/WDCM_GeoDashboard/">WDCM Geo</a></b><br>
+                                                   <font size = "2">Wikidata items interactive maps.</font></li><br>
+                                                   <li><b><a href = "https://wikitech.wikimedia.org/wiki/Wikidata_Concepts_Monitor">WDCM System Technical Documentation</a></b><br>
                                                    <font size = "2">The WDCM Wikitech Page.</font></li>
                                                    </ul>'
                                                         )
