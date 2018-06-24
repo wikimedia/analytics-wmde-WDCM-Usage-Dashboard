@@ -30,12 +30,16 @@ library(scales)
 ### --------------------------------
 
 ### --- Credentials
+# - credentials on tools.labsdb
+setwd('/home/goransm/WMDE/WDCM/WDCM_RScripts')
+cred <- readLines('/home/goransm/mySQL_Credentials/replica.my.cnf')
+mySQLCreds <- data.frame(user = gsub("^[[:alnum:]]+\\s=\\s", "", cred[2]),
+                         password = gsub("^[[:alnum:]]+\\s=\\s", "", cred[3]),
+                         stringsAsFactors = F)
+rm(cred)
+
 # setwd('/home/goransm/WMDE/WDCM/WDCM_RScripts/WDCM_Dashboard/aux')
 setwd('/srv/shiny-server/aux')
-
-mySQLCreds <- fread("mySQLCreds.csv", 
-                    header = T,
-                    drop = 1)
 
 ### -- Connect
 con <- dbConnect(MySQL(), 
