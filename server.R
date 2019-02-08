@@ -4,8 +4,7 @@
 ### ---------------------------------------------------------------------------
 
 ### --- Setup
-rm(list = ls())
-### --------------------------------
+
 ### --- general
 library(shiny)
 library(shinydashboard)
@@ -16,8 +15,11 @@ library(stringr)
 library(tidyr)
 library(dplyr)
 library(reshape2)
+library(XML)
+
 ### --- compute
 library(parallelDist)
+
 ### --- visualization
 library(RColorBrewer)
 library(visNetwork)
@@ -29,23 +31,23 @@ library(scales)
 ### --- Server (Session) Scope
 ### --------------------------------
 
+### --- Config File
+params <- xmlParse('wdcmConfig_wdcmUsageDashboard.xml')
+params <- xmlToList(params)
+
 ### --- Credentials
 # - credentials on tools.labsdb
-setwd('/home/goransm/WMDE/WDCM/WDCM_RScripts')
-cred <- readLines('/home/goransm/mySQL_Credentials/replica.my.cnf')
+cred <- readLines(params$mySQL_Credentials_Path)
 mySQLCreds <- data.frame(user = gsub("^[[:alnum:]]+\\s=\\s", "", cred[2]),
                          password = gsub("^[[:alnum:]]+\\s=\\s", "", cred[3]),
                          stringsAsFactors = F)
 rm(cred)
 
-# setwd('/home/goransm/WMDE/WDCM/WDCM_RScripts/WDCM_Dashboard/aux')
-setwd('/srv/shiny-server/aux')
-
 ### -- Connect
 con <- dbConnect(MySQL(), 
-                 host = "tools.labsdb", 
-                 defult.file = "/home/goransm/mySQL_Credentials/replica.my.cnf",
-                 dbname = "u16664__wdcm_p",
+                 host = params$db_host, 
+                 defult.file = params$mySQL_Credentials_Path,
+                 dbname = params$db_name,
                  user = mySQLCreds$user,
                  password = mySQLCreds$password)
 
@@ -119,10 +121,10 @@ wdcmProjectTypeCategory <- wdcmProjectCategory %>%
   arrange(desc(Usage))
 # - wdcmProjectTypeItem100
 wdcmProjectTypeItem100 <- wdcmProjectItem100 %>% 
-  select(`Project Type`, EntityID, Label, Usage) %>% 
-  group_by(`Project Type`, EntityID, Label) %>% 
-  summarise(Usage = sum(Usage)) %>% 
-  arrange(`Project Type`, desc(Usage))
+  dplyr::select(`Project Type`, EntityID, Label, Usage) %>% 
+  dplyr::group_by(`Project Type`, EntityID, Label) %>% 
+  dplyr::summarise(Usage = sum(Usage)) %>% 
+  dplyr::arrange(`Project Type`, desc(Usage))
 
 ### --- Compute project similarity structure
 projectSimilarity <- wdcmProjectCategory %>% 
@@ -164,8 +166,7 @@ unzip_projectTypes <- lapply(projectTypes, function(x) {
 names(unzip_projectTypes) <- search_projectTypes
 
 ### --- Fetch update info
-setwd('/srv/shiny-server/WDCM_UsageDashboard/update/')
-update <- read.csv('toLabsReport.csv', 
+update <- read.csv(params$update_File_Path, 
                    header = T,
                    check.names = F,
                    stringsAsFactors = F,
@@ -174,14 +175,11 @@ update <- read.csv('toLabsReport.csv',
 ### --- shinyServer
 shinyServer(function(input, output, session) {
   
-  ### --- output: updateInfo
-  output$updateInfo <- renderText({
-    date <- update$timeStamp[dim(update)[1]]
-    date <- strsplit(as.character(date), split = " ", fixed = T)[[1]][1]
-    date <- strsplit(date, split = "-", fixed = T)
-    date[[1]][2] <- month.name[as.numeric(date[[1]][2])]
-    date <- paste(unlist(date), collapse = " ")
-    return(paste("<p align=right>Last update: <i>", date, "</i></p>", sep = ""))
+  ### --- output: updateString
+  output$updateString <- renderText({
+    date <- update[max(which(grepl("Orchestra END", update$Step))), ]$Time
+    date <- paste0(date, " UTC")
+    return(paste('<p style="font-size:80%;"align="right"><b>Last update: </b><i>', date, '</i></p>', sep = ""))
   })
   
   ### ----------------------------------
@@ -252,7 +250,7 @@ shinyServer(function(input, output, session) {
   output$categoryProjects_overview <- renderPlot({
     if (!(input$categories == "")) {
       plotFrame <- wdcmProjectCategory %>% 
-        select(Project, Category, Usage) %>% 
+        dplyr::select(Project, Category, Usage) %>% 
         filter(Category %in% input$categories) %>% 
         arrange(desc(Usage))
       otherSum <- sum(plotFrame$Usage[31:dim(plotFrame)[1]]) 
@@ -373,7 +371,7 @@ shinyServer(function(input, output, session) {
   updateSelectizeInput(session,
                        'projects',
                        choices = projects,
-                       selected = projects[round(runif(1, 1, length(projects)))],
+                       selected = 'enwiki',
                        server = TRUE)
   
   ### --- barplot: projectOverview_Category
@@ -416,7 +414,7 @@ shinyServer(function(input, output, session) {
     rankProjectType <- which(rankType$Project %in% project)
     # - total projects of this type
     totalProjectType <- dim(rankType)[1]
-    paste("<p align = \"right\"><br><br><br><br>Wikidata usage on <b>", project, "</b>:<br><br>", "<font size = 2><b>", project, "</b> ", " has a total Wikidata usage volume of <b>", 
+    paste("<p style=\"font-size:80%;\"align=\"left\">Wikidata usage on <b>", project, "</b>:<br><br>", "<font size = 2><b>", project, "</b> ", " has a total Wikidata usage volume of <b>", 
           volume, "</b> items (<b>", percVolume, "</b> of total Wikidata usage across the 
           client projects).<br>In terms of Wikidata usage, it is ranked <b>", totalRank, "/", totalProjects, "</b> among all client projects, and <b>", 
           rankProjectType, "/", totalProjectType, ".</b> in 
