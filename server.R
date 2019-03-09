@@ -8,7 +8,7 @@
 ### --- general
 library(shiny)
 library(shinydashboard)
-library(RMySQL)
+### --- wrangling
 library(data.table)
 library(DT)
 library(stringr)
@@ -16,10 +16,11 @@ library(tidyr)
 library(dplyr)
 library(reshape2)
 library(XML)
-
+### --- connect
+library(httr)
+library(curl)
 ### --- compute
 library(parallelDist)
-
 ### --- visualization
 library(RColorBrewer)
 library(visNetwork)
@@ -35,145 +36,149 @@ library(scales)
 params <- xmlParse('wdcmConfig_wdcmUsageDashboard.xml')
 params <- xmlToList(params)
 
-### --- Credentials
-# - credentials on tools.labsdb
-cred <- readLines(params$mySQL_Credentials_Path)
-mySQLCreds <- data.frame(user = gsub("^[[:alnum:]]+\\s=\\s", "", cred[2]),
-                         password = gsub("^[[:alnum:]]+\\s=\\s", "", cred[3]),
-                         stringsAsFactors = F)
-rm(cred)
+### --- functions
+get_WDCM_table <- function(url_dir, filename, row_names) {
+  read.csv(paste0(url_dir, filename), 
+           header = T, 
+           stringsAsFactors = F,
+           check.names = F)
+}
 
-### -- Connect
-con <- dbConnect(MySQL(), 
-                 host = params$db_host, 
-                 defult.file = params$mySQL_Credentials_Path,
-                 dbname = params$db_name,
-                 user = mySQLCreds$user,
-                 password = mySQLCreds$password)
-
-### --- list existing tables
-q <- "SHOW TABLES;"
-res <- dbSendQuery(con, q)
-st <- fetch(res, -1)
-dbClearResult(res)
-colnames(st) <- "tables"
-
-### --- SET CHARACTER SET utf8
-q <- "SET CHARACTER SET utf8;"
-res <- dbSendQuery(con, q)
-dbClearResult(res)
-
-### --- fetch wdcm2_project
-q <- "SELECT * FROM wdcm2_project;"
-res <- dbSendQuery(con, q)
-wdcmProject <- fetch(res, -1)
-dbClearResult(res)
-colnames(wdcmProject) <- c('Project', 'Usage', 'Project Type')
-
-### --- fetch wdcm2_project_category
-q <- "SELECT * FROM wdcm2_project_category;"
-res <- dbSendQuery(con, q)
-wdcmProjectCategory <- fetch(res, -1)
-dbClearResult(res) 
-colnames(wdcmProjectCategory) <- c('Project', 'Category', 'Usage', 'Project Type')
-
-### --- fetch wdcm2_project_item100
-q <- "SELECT * FROM wdcm2_project_item100;"
-res <- dbSendQuery(con, q)
-wdcmProjectItem100 <- fetch(res, -1)
-dbClearResult(res) 
-colnames(wdcmProjectItem100) <- c('Project', 'EntityID', 'Usage', 'Project Type', 'Label')
-
-### --- fetch wdcm2_project_category_item100
-q <- "SELECT * FROM wdcm2_project_category_item100;"
-res <- dbSendQuery(con, q)
-wdcmProjectCategoryItem100 <- fetch(res, -1)
-dbClearResult(res) 
-colnames(wdcmProjectCategoryItem100) <- c('Project', 'Category', 'EntityID', 'Usage', 'Project Type', 'Label')
-
-### --- fetch wdcm2_category
-q <- "SELECT * FROM wdcm2_category;"
-res <- dbSendQuery(con, q)
-wdcmCategory <- fetch(res, -1)
-dbClearResult(res) 
-colnames(wdcmCategory) <- c('Category', 'Usage')
-
-### --- fetch wdcm2_category_item100
-q <- "SELECT * FROM wdcm2_category_item100;"
-res <- dbSendQuery(con, q)
-wdcmCategoryItem100 <- fetch(res, -1)
-dbClearResult(res) 
-colnames(wdcmCategoryItem100) <- c('EntityID', 'Usage', 'Category', 'Label')
-
-### --- Disconnect
-dbDisconnect(con)
-
-### --- Compute per `Project Type` tables
-# - wdcmProjectType
-wdcmProjectType <- wdcmProject %>% 
-  group_by(`Project Type`) %>% 
-  summarise(Usage = sum(Usage)) %>% 
-  arrange(desc(Usage))
-# - wdcmProjectTypeCategory
-wdcmProjectTypeCategory <- wdcmProjectCategory %>% 
-  group_by(`Project Type`, Category) %>% 
-  summarise(Usage = sum(Usage)) %>% 
-  arrange(desc(Usage))
-# - wdcmProjectTypeItem100
-wdcmProjectTypeItem100 <- wdcmProjectItem100 %>% 
-  dplyr::select(`Project Type`, EntityID, Label, Usage) %>% 
-  dplyr::group_by(`Project Type`, EntityID, Label) %>% 
-  dplyr::summarise(Usage = sum(Usage)) %>% 
-  dplyr::arrange(`Project Type`, desc(Usage))
-
-### --- Compute project similarity structure
-projectSimilarity <- wdcmProjectCategory %>% 
-  dplyr::select(Project, Category, Usage) %>% 
-  tidyr::spread(key = Category,
-         value = Usage,
-         fill = 0)
-projectNames <- projectSimilarity$Project
-projectSimilarity$Project <- NULL
-# - normalize:
-projectSimilarity <- t(apply(projectSimilarity, 1, function(x) {x/sum(x)}))
-# projectSimilarity[projectSimilarity > 0] <- 1
-projectSimilarity <- as.matrix(parDist(as.matrix(projectSimilarity), method = "kullback"))
-rownames(projectSimilarity) <- projectNames
-colnames(projectSimilarity) <- projectNames
-
-### - Determine Constants
-# - determine Projects
-projects <- wdcmProject$Project
-# - determine present Project Types
-projectTypes <- unique(wdcmProject$`Project Type`)
-# - and assign Brewer colors
-lengthProjectColor <- length(unique(wdcmProject$`Project Type`))
-projectTypeColor <- brewer.pal(lengthProjectColor, "Set1")
-names(projectTypeColor) <- unique(wdcmProject$`Project Type`)
-# - determine Categories
-categories <- wdcmCategory$Category
-# - totalUsage
-totalUsage <- sum(wdcmProject$Usage)
-totalProjects <- length(wdcmProject$Project)
-totalCategories <- length(wdcmCategory$Category)
-totalProjectTypes <- length(wdcmProjectType$`Project Type`)
-
-### --- prepare search constants for Tabs/Crosstabs
-search_projectTypes <- paste("_", projectTypes, sep = "")
-unzip_projectTypes <- lapply(projectTypes, function(x) {
-  wdcmProject$Project[which(wdcmProject$`Project Type` %in% x)]
-})
-names(unzip_projectTypes) <- search_projectTypes
-
-### --- Fetch update info
-update <- read.csv(params$update_File_Path, 
-                   header = T,
-                   check.names = F,
-                   stringsAsFactors = F,
-                   row.names = 1)
+# - projectType() to determine project type
+projectType <- function(projectName) {
+  unname(sapply(projectName, function(x) {
+    if (grepl("commons", x, fixed = T)) {"Commons"
+    } else if (grepl("mediawiki|meta|species|wikidata", x)) {"Other"
+    } else if (grepl("wiki$", x)) {"Wikipedia"
+    } else if (grepl("quote$", x)) {"Wikiquote"
+    } else if (grepl("voyage$", x)) {"Wikivoyage"
+    } else if (grepl("news$", x)) {"Wikinews"
+    } else if (grepl("source$", x)) {"Wikisource"
+    } else if (grepl("wiktionary$", x)) {"Wiktionary"
+    } else if (grepl("versity$", x)) {"Wikiversity"
+    } else if (grepl("books$", x)) {"Wikibooks"
+    } else {"Other"}
+  }))
+}
 
 ### --- shinyServer
 shinyServer(function(input, output, session) {
+  
+  ### --- DATA
+  
+  withProgress(message = 'Downloading data', detail = "Please be patient.", value = 0, {
+  
+  ### --- fetch wdcm2_project
+  wdcmProject <- get_WDCM_table(params$etl_dir, 'wdcm_project.csv')
+  wdcmProject$type <- projectType(wdcmProject$eu_project)
+  colnames(wdcmProject) <- c('Project', 'Usage', 'Project Type')
+  incProgress(1/6, detail = "Please be patient.")
+  
+  ### --- fetch wdcm2_project_category
+  wdcmProjectCategory <- get_WDCM_table(params$etl_dir, 'wdcm_project_category.csv', row_names = F)
+  wdcmProjectCategory$type <- projectType(wdcmProjectCategory$eu_project)
+  colnames(wdcmProjectCategory) <- c('Project', 'Category', 'Usage', 'Project Type')
+  # - fix `Wikimedia_Internal` to `Wikimedia`
+  wdcmProjectCategory$Category[wdcmProjectCategory$Category == 'Wikimedia_Internal'] <- 'Wikimedia'
+  incProgress(2/6, detail = "Please be patient.")
+  
+  ### --- fetch wdcm2_project_item100
+  wdcmProjectItem100 <- get_WDCM_table(params$etl_dir, 'wdcm_project_item100.csv')
+  wdcmProjectItem100$type <- projectType(wdcmProjectItem100$eu_project)
+  colnames(wdcmProjectItem100) <- c('Project', 'EntityID', 'Usage','Label', 'Project Type')
+  incProgress(3/6, detail = "Please be patient.")
+  
+  ### --- fetch wdcm2_project_category_item100
+  wdcmProjectCategoryItem100 <- get_WDCM_table(params$etl, 'wdcm_project_category_item100.csv')
+  wdcmProjectCategoryItem100$projectType <- projectType(wdcmProjectCategoryItem100$eu_project)
+  colnames(wdcmProjectCategoryItem100) <- 
+    c('Project', 'Category', 'EntityID', 'Usage', 'Label', 'Project Type')
+  wdcmProjectCategoryItem100 <- dplyr::arrange(wdcmProjectCategoryItem100, 
+                                               Project, Category, desc(Usage))
+  # - fix `Wikimedia_Internal` to `Wikimedia`
+  wdcmProjectCategoryItem100$Category[wdcmProjectCategoryItem100$Category == 'Wikimedia_Internal'] <- 'Wikimedia'
+  incProgress(4/6, detail = "Please be patient.")
+  
+  ### --- fetch wdcm2_category
+  wdcmCategory <- get_WDCM_table(params$etl, 'wdcm_category.csv')
+  colnames(wdcmCategory) <- c('Category', 'Usage')
+  incProgress(5/6, detail = "Please be patient.")
+  
+  ### --- fetch wdcm2_category_item100
+  wdcmCategoryItem100 <- get_WDCM_table(params$etl, 'wdcm_category_item.csv')
+  colnames(wdcmCategoryItem100) <- c('EntityID', 'Usage', 'Label', 'Category')
+  incProgress(6/6, detail = "Please be patient.")
+  
+  })
+  
+  ### --- Compute per `Project Type` tables
+  # - wdcmProjectType
+  wdcmProjectType <- wdcmProject %>% 
+    group_by(`Project Type`) %>% 
+    summarise(Usage = sum(Usage)) %>% 
+    arrange(desc(Usage))
+  # - wdcmProjectTypeCategory
+  wdcmProjectTypeCategory <- wdcmProjectCategory %>% 
+    group_by(`Project Type`, Category) %>% 
+    summarise(Usage = sum(Usage)) %>% 
+    arrange(desc(Usage))
+  # - wdcmProjectTypeItem100
+  wdcmProjectTypeItem100 <- wdcmProjectItem100 %>% 
+    dplyr::select(`Project Type`, EntityID, Label, Usage) %>% 
+    dplyr::group_by(`Project Type`, EntityID, Label) %>% 
+    dplyr::summarise(Usage = sum(Usage)) %>% 
+    dplyr::arrange(`Project Type`, desc(Usage))
+  
+  ### --- Compute project similarity structure
+  projectSimilarity <- wdcmProjectCategory %>% 
+    dplyr::select(Project, Category, Usage) %>% 
+    tidyr::spread(key = Category,
+                  value = Usage,
+                  fill = 0)
+  projectNames <- projectSimilarity$Project
+  projectSimilarity$Project <- NULL
+  # - normalize:
+  projectSimilarity <- t(apply(projectSimilarity, 1, function(x) {x/sum(x)}))
+  # projectSimilarity[projectSimilarity > 0] <- 1
+  projectSimilarity <- as.matrix(parDist(as.matrix(projectSimilarity), method = "kullback"))
+  rownames(projectSimilarity) <- projectNames
+  colnames(projectSimilarity) <- projectNames
+  
+  ### - Determine Constants
+  # - determine Projects
+  projects <- wdcmProject$Project
+  # - determine present Project Types
+  projectTypes <- unique(wdcmProject$`Project Type`)
+  # - and assign Brewer colors
+  lengthProjectColor <- length(unique(wdcmProject$`Project Type`))
+  projectTypeColor <- brewer.pal(lengthProjectColor, "Set1")
+  names(projectTypeColor) <- unique(wdcmProject$`Project Type`)
+  # - determine Categories
+  categories <- wdcmCategory$Category
+  # - fix `Wikimedia_Internal` to `Wikimedia`
+  categories[categories == 'Wikimedia_Internal'] <- 'Wikimedia'
+  # - totalUsage
+  totalUsage <- sum(wdcmProject$Usage)
+  totalProjects <- length(wdcmProject$Project)
+  totalCategories <- length(wdcmCategory$Category)
+  totalProjectTypes <- length(wdcmProjectType$`Project Type`)
+  
+  ### --- prepare search constants for Tabs/Crosstabs
+  search_projectTypes <- paste("_", projectTypes, sep = "")
+  unzip_projectTypes <- lapply(projectTypes, function(x) {
+    wdcmProject$Project[which(wdcmProject$`Project Type` %in% x)]
+  })
+  names(unzip_projectTypes) <- search_projectTypes
+  
+  ### --- Fetch update info
+  update <- read.csv(params$updatePath, 
+                     header = T,
+                     check.names = F,
+                     stringsAsFactors = F,
+                     row.names = 1)
+  
+  
+  ### --- OUTPUTS
   
   ### --- output: updateString
   output$updateString <- renderText({
@@ -295,7 +300,12 @@ shinyServer(function(input, output, session) {
       plotFrame <- wdcmCategoryItem100 %>% 
         filter(Category %in% input$categories) %>% 
         arrange(desc(Usage))
-      plotFrame <- plotFrame[1:30, ] 
+      plotFrame <- plotFrame[1:30, ]
+      plotFrame$Label[plotFrame$Label == ''] <- plotFrame$EntityID[plotFrame$Label == '']
+      lCheck <- table(plotFrame$Label)
+      dLabs <- which(lCheck > 1)
+      wdLabs <- which(plotFrame$Label == names(dLabs))
+      plotFrame$Label[wdLabs[2]] <- paste0(plotFrame$Label[wdLabs[2]], " ")
       plotFrame$Label <- factor(plotFrame$Label, 
                                   levels = plotFrame$Label[order(plotFrame$Usage)])
       ggplot(plotFrame, aes(x = Usage, y = Label)) +
@@ -434,7 +444,7 @@ shinyServer(function(input, output, session) {
   output$projectOverview_relativeRank <- renderPlot({
     if (!(input$projects == "")) {
       ix <- which(wdcmProject$Project %in% input$projects)
-      ixRange <- seq(ix-10, ix+10, by = 1)
+      ixRange <- seq(ix - 10, ix + 10, by = 1)
       ixRange <- ixRange[which(ixRange > 0 & ixRange <= length(wdcmProject$Project))]
       plotFrame <- wdcmProject[ixRange, ]
       plotFrame$Rank <- ixRange
